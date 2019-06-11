@@ -1,5 +1,5 @@
 
-CC = gcc
+CC = g++
 CFLAGS = -Wall -O2
 LIBS =
 LIBS += -lz
@@ -18,9 +18,9 @@ OBJS += connect.o
 SPROXY_OBJS = $(OBJS)
 SPROXY_OBJS += sproxy.o
 
-http.o: http.c http.h
-connect.o: connect.c connect.h
-sproxy.o: sproxy.c
+http.o: http.cpp http.h
+connect.o: connect.cpp connect.h
+sproxy.o: sproxy.cpp
 
 $(ProgramName): $(SPROXY_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LIBS)

@@ -12,7 +12,8 @@
 #include <sys/wait.h>
 #include <netinet/in.h> 
 #include "http.h"
-
+#include<map>
+#include <string>
 #include <string.h>
 
 #define BUF_SIZE 8192
@@ -63,7 +64,7 @@ char* header_buffer;
 
 
 //http://ip.taobao.com/service/getIpInfo.php?ip=118.112.56.113
-#define DEBUG
+//#define DEBUG
 
 enum
 {
@@ -130,7 +131,7 @@ ssize_t readLine(int fd, void* buffer, size_t n)
 		return -1;
 	}
 
-	buf = buffer;
+	buf = (char *)buffer;
 
 	totRead = 0;
 	for (;;) {
@@ -206,7 +207,7 @@ int read_header(int fd, void* buffer)
 
 void extract_server_path(const char* header, char* output)
 {
-	char* p = strstr(header, "GET /");
+	char* p = (char *)strstr(header, "GET /");
 	if (p) {
 		char* p1 = strchr(p + 4, ' ');
 		strncpy(output, p + 4, (int)(p1 - p - 4));
@@ -219,7 +220,7 @@ void extract_server_path(const char* header, char* output)
 
 int get_host(const char* header,char * remote_host,int *remote_port)
 {
-	char* _p = strstr(header, "CONNECT");  /* 在 CONNECT 方法中解析 隧道主机名称及端口号 */
+	char* _p = (char *)strstr(header, "CONNECT");  /* 在 CONNECT 方法中解析 隧道主机名称及端口号 */
 	if (_p)
 	{
 		char* _p1 = strchr(_p, ' ');
@@ -250,7 +251,7 @@ int get_host(const char* header,char * remote_host,int *remote_port)
 	}
 
 
-	char* p = strstr(header, "Host:");
+	char* p = (char *)strstr(header, "Host:");
 	if (!p)
 	{
 		return BAD_HTTP_PROTOCOL;
@@ -296,7 +297,7 @@ int get_host(const char* header,char * remote_host,int *remote_port)
 int extract_host(const char* header)
 {
 
-	char* _p = strstr(header, "CONNECT");  /* 在 CONNECT 方法中解析 隧道主机名称及端口号 */
+	char* _p = (char *)strstr(header, "CONNECT");  /* 在 CONNECT 方法中解析 隧道主机名称及端口号 */
 	if (_p)
 	{
 		char* _p1 = strchr(_p, ' ');
@@ -327,7 +328,7 @@ int extract_host(const char* header)
 	}
 
 
-	char* p = strstr(header, "Host:");
+	char* p = (char *)strstr(header, "Host:");
 	if (!p)
 	{
 		return BAD_HTTP_PROTOCOL;
@@ -505,93 +506,6 @@ void handle_client_fromproxy(int client_sock, struct sockaddr_in client_addr) {
 	close(client_sock);
 }
 
-/*
-void handle_client_fromproxy(int client_sock, struct sockaddr_in client_addr) {
-	int is_http_tunnel = 0;
-	if (strlen(remote_host) == 0) // 未指定远端主机名称从http 请求 HOST 字段中获取
-	{
-
-#ifdef DEBUG
-		LOG(" ============ handle new client ============\n");
-		LOG(">>>Header:%s\n", header_buffer);
-#endif
-
-		if (read_header(client_sock, header_buffer) < 0)
-		{
-			LOG("Read Http header failed\n");
-			return;
-		}
-		else
-		{
-			char* p = strstr(header_buffer, "CONNECT"); // 判断是否是http 隧道请求
-			if (p)
-			{
-				LOG("receive CONNECT request\n");
-				is_http_tunnel = 1;
-			}
-
-			if (strstr(header_buffer, "GET /mproxy") > 0)
-			{
-				LOG("====== hand mproxy info request ====");
-				//返回mproxy的运行基本信息
-				hand_mproxy_info_req(client_sock, header_buffer);
-
-				return;
-			}
-
-			if (extract_host(header_buffer) < 0)
-			{
-				LOG("Cannot extract host field,bad http protrotol");
-				return;
-			}
-			LOG("Host:%s port: %d io_flag:%d\n", remote_host, remote_port, io_flag);
-
-		}
-	}
-
-	if ((remote_sock = create_connection()) < 0) {
-		LOG("Cannot connect to host [%s:%d]\n", remote_host, remote_port);
-		return;
-	}
-
-	if (fork() == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
-
-		if (strlen(header_buffer) > 0 && !is_http_tunnel)
-		{
-			forward_header(remote_sock); //普通的http请求先转发header
-		}
-
-		forward_data(client_sock, remote_sock);
-		exit(0);
-	}
-
-	if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
-
-		if (io_flag == W_S_ENC)
-		{
-			io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-		}
-		else if (io_flag == R_C_DEC)
-		{
-			io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
-		}
-
-		if (is_http_tunnel)
-		{
-			send_tunnel_ok(client_sock);
-		}
-
-		forward_data(remote_sock, client_sock);
-		exit(0);
-	}
-
-	close(remote_sock);
-	close(client_sock);
-}
-*/
-
-
-
 void handle_client_fromclient(int client_sock, struct sockaddr_in client_addr) {
 	int is_http_tunnel = 0;
 
@@ -659,6 +573,7 @@ void handle_client_fromclient(int client_sock, struct sockaddr_in client_addr) {
 	close(client_sock);
 }
 
+std::map<std::string, int> g_mapDom;
 
 /* 处理客户端的连接 */
 void handle_client(int client_sock, struct sockaddr_in client_addr)
@@ -683,24 +598,35 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
 	int port;
 	get_host(header_buffer, dom, &port);
 	socket_resolver(dom, ip);
-	
-	char url[4096] = { 0 };
-	char* buf = 0;
-	int ret;
-	sprintf(url, "http://ip.taobao.com/service/getIpInfo.php?ip=%s", ip);
-	ret = http_get(url, &buf);        // Downloads page
-	if (ret==-1 || strstr(buf, "中国") != 0) {
-		bProxy = 0;
-		LOG("Proxy %s is false\n", dom);
+	std::string strDomain = dom;
+
+	std::map<std::string, int>::iterator it = g_mapDom.find(strDomain);
+	if (it == g_mapDom.end()) {
+		LOG("cannot find ...........");
+		char url[4096] = { 0 };
+		char* buf = 0;
+		int ret;
+		sprintf(url, "http://ip.taobao.com/service/getIpInfo.php?ip=%s", ip);
+		ret = http_get(url, &buf);        // Downloads page
+		if (ret == -1 || strstr(buf, "中国") != 0) {
+			bProxy = 0;
+			LOG("Proxy %s:%d is false\n", dom, port);
+		}
+		else {
+			bProxy = 1;
+			LOG("Proxy %s:%d is true\n", dom, port);
+		}
+
+		if (ret != -1) {
+			g_mapDom[strDomain] = bProxy;
+			free(buf);
+		}		
 	}
 	else {
-		bProxy = 1;
-		LOG("Proxy %s is true\n", dom);
+		LOG(" find +++++++++");
+		bProxy = it->second;
 	}
-
-	if (ret != -1) {
-		free(buf);
-	}
+	
 	
 
 	//直接一级代理
@@ -719,13 +645,12 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
 
 void forward_header(int destination_sock)
 {
-	LOG("<<<<<<<%s\n", header_buffer);
 	rewrite_header();
 #ifdef DEBUG
 	LOG("================ The Forward HEAD =================");
 	LOG("%s\n", header_buffer);
 #endif
-	LOG(">>>>>>%s\n", header_buffer);
+
 	int len = strlen(header_buffer);
 	send_data(destination_sock, header_buffer, len);
 }
@@ -833,7 +758,7 @@ int create_connection() {
 		errno = EFAULT;
 		return CLIENT_RESOLVE_ERROR;
 	}
-	LOG("======= forward request to remote host:%s port:%d ======= \n", remote_host, remote_port);
+	//LOG("======= forward request to remote host:%s port:%d ======= \n", remote_host, remote_port);
 	memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
 	memcpy(&server_addr.sin_addr.s_addr, server->h_addr, server->h_length);

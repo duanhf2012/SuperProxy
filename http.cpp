@@ -60,7 +60,7 @@ int http_get(char *url, char **out)
         return -1;
     }
 
-    header = calloc(1, sizeof(struct resp_headers));
+    header = (resp_headers *)calloc(1, sizeof(struct resp_headers));
     if ((status = parse_header(header, hbuf)) == -1) {
         fprintf(stderr, "http_get %s%s: fail to parse response header\n",
                 host, arg);
@@ -88,7 +88,7 @@ int http_get(char *url, char **out)
             return -1;
         }
 
-        header = calloc(1, sizeof(struct resp_headers));
+        header = (resp_headers*)calloc(1, sizeof(struct resp_headers));
         if ((status = parse_header(header, hbuf)) == -1) {
             fprintf(stderr, "http_get %s%s: fail to parse response header\n",
                     host, arg);
@@ -144,7 +144,7 @@ static struct request *request_new(const char *method, char *arg)
 {
     struct request *req;
 
-    if ((req = malloc(sizeof(struct request))) == NULL) {
+    if ((req = (struct request *)malloc(sizeof(struct request))) == NULL) {
         fprintf(stderr, "debug: request_new, malloc error\n");
         return NULL;
     }
@@ -153,7 +153,7 @@ static struct request *request_new(const char *method, char *arg)
     req->hcount = 0;
     req->method = method;
     req->arg = arg;
-    req->headers = calloc(req->hlimit, sizeof(struct request_header));
+    req->headers = (struct request::request_header *)calloc(req->hlimit, sizeof(request::request_header));
 
     return req;
 }
@@ -171,11 +171,11 @@ static void request_free (struct request *req)
 /* Set the request named NAME to VALUE. */
 static int request_set_header(struct request *req, const char *name, char *value)
 {
-    struct request_header *hdr, *np;
+    struct request::request_header *hdr, *np;
     int i;
 
     for (i = 0; i < req->hcount; i++) {          // replace exist header
-        hdr = &req->headers[i];
+        hdr = (struct request::request_header*)&req->headers[i];
         if (strcasecmp(hdr->name, name) == 0) {
             hdr->value = value;
             return 0;
@@ -184,7 +184,7 @@ static int request_set_header(struct request *req, const char *name, char *value
 
     if (req->hcount >= req->hlimit) {
         req->hlimit *= 2;
-        np = realloc(req->headers, req->hlimit * sizeof(*hdr));
+        np = (request::request_header*)realloc(req->headers, req->hlimit * sizeof(*hdr));
         if (np == NULL) {
             fprintf(stderr, "request_set_header: realloc error\n");
             return -1;
@@ -193,7 +193,7 @@ static int request_set_header(struct request *req, const char *name, char *value
         req->headers = np;
     }
 
-    hdr = &req->headers[req->hcount++];
+    hdr = (struct request::request_header*) &req->headers[req->hcount++];
     hdr->name = name;
     hdr->value = value;
     return 0;
@@ -202,7 +202,7 @@ static int request_set_header(struct request *req, const char *name, char *value
 
 static size_t create_req_str(struct request *req)
 {
-    struct request_header *hdr;
+    struct request::request_header *hdr;
     char *p;
     size_t size = 0;
     int i;
@@ -212,7 +212,7 @@ static size_t create_req_str(struct request *req)
     size += strlen(req->arg) + 1 + 8 + 1 + 2;
     for (i = 0; i < req->hcount; i++) {
         /* header_name: header_value\r\n */
-        hdr = &req->headers[i];
+        hdr = (struct request::request_header*) &req->headers[i];
         size += strlen(hdr->name) + 2 + strlen(hdr->value) + 2;
     }
 
@@ -225,7 +225,7 @@ static size_t create_req_str(struct request *req)
     strcat(p, req->arg);
     strcat(p, " HTTP/1.0 \r\n");
     for (i = 0; i < req->hcount; i++) {
-        hdr = &req->headers[i];
+        hdr = (struct request::request_header*) &req->headers[i];
         strcat(p, hdr->name), strcat(p, ": ");
         strcat(p, hdr->value), strcat(p, "\r\n");
     }
@@ -276,7 +276,7 @@ static char *read_drain_headers(int fd)
         if (buf != NULL)
             free(buf);
 
-        if ((buf = calloc(1, buflen)) == NULL) {
+        if ((buf = (char *)calloc(1, buflen)) == NULL) {
             fprintf(stderr, "read_drain_headers: calloc error\n");
             return NULL;
         }
@@ -323,7 +323,7 @@ static int parse_header(struct resp_headers *resp, char *head)
     resp->data = head;
     resp->hcount = 0;
     resp->hlimit = 16;
-    resp->headers = malloc(resp->hlimit * sizeof(char **));
+    resp->headers = (char**)malloc(resp->hlimit * sizeof(char **));
     memset(resp->headers, 0, resp->hlimit * sizeof(char **));
 
     resp->headers[resp->hcount++] = head;
@@ -335,7 +335,7 @@ static int parse_header(struct resp_headers *resp, char *head)
 
         if (resp->hcount >= resp->hlimit) {
             resp->hlimit *= 2;
-            np = realloc(resp->headers, resp->hlimit * sizeof(char **));
+            np = (char **)realloc(resp->headers, resp->hlimit * sizeof(char **));
             if (np == NULL) {
                 fprintf(stderr, "parse_header: realloc error\n");
                 free(resp->data);
@@ -394,13 +394,13 @@ static char *response_head_strdup(struct resp_headers *resp, char *name)
     else
         next = resp->headers[i + 1]; // - resp->headers[0];
 
-    h = strchr(p, ':'), h++;   // skip :
+    h = (char *)strchr(p, ':'), h++;   // skip :
     while (isspace(*h)) {
         h++;
     }
 
     buflen = next - h - 2 + 1;   // minus \r\n, plus '\0'
-    value = calloc(1, buflen);
+    value = (char *)calloc(1, buflen);
     strncpy(value, h, buflen);
     value[buflen - 1] = '\0';
 
@@ -414,7 +414,7 @@ static unsigned char *read_response_body(int fd)
     ssize_t nread, ntotal;
     size_t bufsize = HTTP_BUFSIZE;
 
-    buf = calloc(1, bufsize);
+    buf = (unsigned char*)calloc(1, bufsize);
     ntotal = 0;
     while (1) {
         if ((nread = readn(fd, buf + ntotal, bufsize - ntotal)) < 0) {
@@ -427,7 +427,7 @@ static unsigned char *read_response_body(int fd)
         ntotal += nread;
         if (ntotal == bufsize) {
             bufsize *= 2;
-            np = realloc(buf, bufsize);
+            np = (unsigned char*)realloc(buf, bufsize);
             if (np == NULL) {
                 fprintf(stderr, "debug: read_response_body, realloc error\n");
                 free(buf);
@@ -491,7 +491,7 @@ static unsigned char *read_response_body_gzip(int sockfd)
 
             strm.avail_out = buflen - nwritten_total;
             bufleft = strm.avail_out;
-            np = realloc(buf, buflen);
+            np = (unsigned char*)realloc(buf, buflen);
             if (np == NULL) {
                 fprintf(stderr, "debug: inflate realloc error\n");
                 free(buf);

@@ -16,7 +16,7 @@ ssize_t readn(int fd, void *usrbuf, size_t n)
 {
     size_t nleft = n;
     ssize_t nread;
-    char *bufp = usrbuf;
+    char *bufp = (char *)usrbuf;
 
     while (nleft > 0) {
         if ((nread = read(fd, bufp, nleft)) < 0) {
@@ -39,7 +39,7 @@ ssize_t writen(int fd, void *usrbuf, size_t n)
 {
     size_t nleft = n;
     ssize_t nwritten;
-    char *bufp = usrbuf;
+    char *bufp = (char *)usrbuf;
 
     while (nleft > 0) {
         if ((nwritten = write(fd, bufp, nleft)) <= 0) {
