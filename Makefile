@@ -1,14 +1,30 @@
+
 CC = gcc
-CFLAGS = -g -Wall -Werror
+CFLAGS = -Wall -O2
+LIBS =
+LIBS += -lz
 
-all: sproxy
+ProgramName= sproxy
 
-sproxy: sproxy.o
-	$(CC) $(CFLAGS) sproxy.o -o sproxy
+# default target
+.PHONY : all
+all: $(ProgramName)
+	@echo all done!
 
-sproxy.o:
-	$(CC) $(CFLAGS) -c sproxy.c
+OBJS =
+OBJS += http.o
+OBJS += connect.o
 
+SPROXY_OBJS = $(OBJS)
+SPROXY_OBJS += sproxy.o
+
+http.o: http.c http.h
+connect.o: connect.c connect.h
+sproxy.o: sproxy.c
+
+$(ProgramName): $(SPROXY_OBJS)
+	$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
+
+.PHONY : clean
 clean:
-	rm -rf *.o
-	rm sproxy
+	rm -f *.o core a.out $(ProgramName)

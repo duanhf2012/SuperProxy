@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <netinet/in.h> 
-
+#include "http.h"
 
 #include <string.h>
 
@@ -60,6 +60,9 @@ int remote_sock;
 int is_http_tunnel = 0;
 char* header_buffer;
 
+
+
+//http://ip.taobao.com/service/getIpInfo.php?ip=118.112.56.113
 #define DEBUG
 
 enum
@@ -89,6 +92,30 @@ int create_connection();
 int _main(int argc, char* argv[]);
 
 
+
+int socket_resolver(const char* domain, char* ipaddr)
+{
+	if (!domain || !ipaddr) return -1;
+
+	struct hostent* host = gethostbyname(domain);
+	if (!host)
+	{
+		return -1;
+	}
+
+	// 获取第一个IP地址
+	strncpy(ipaddr, inet_ntoa(*(struct in_addr*)host->h_addr), 16);
+
+#if 0
+	// 获取所有的地址
+	for (int i = 0; host->h_addr_list[i]; i++)
+	{
+		//printf("%d ip: %s\n", i, inet_ntoa(*(in_addr*)host->h_addr_list[i]));
+	}
+#endif
+
+	return 0;
+}
 
 
 ssize_t readLine(int fd, void* buffer, size_t n)
@@ -186,6 +213,85 @@ void extract_server_path(const char* header, char* output)
 	}
 
 }
+
+
+
+
+int get_host(const char* header,char * remote_host,int *remote_port)
+{
+	char* _p = strstr(header, "CONNECT");  /* 在 CONNECT 方法中解析 隧道主机名称及端口号 */
+	if (_p)
+	{
+		char* _p1 = strchr(_p, ' ');
+
+		char* _p2 = strchr(_p1 + 1, ':');
+		char* _p3 = strchr(_p1 + 1, ' ');
+
+		if (_p2)
+		{
+			char s_port[10];
+			bzero(s_port, 10);
+
+			memset(remote_host, 0, sizeof(remote_host));
+			strncpy(remote_host, _p1 + 1, (int)(_p2 - _p1) - 1);
+			strncpy(s_port, _p2 + 1, (int)(_p3 - _p2) - 1);
+			*remote_port = atoi(s_port);
+		}
+		else
+		{
+			memset(remote_host, 0, sizeof(remote_host));
+			strncpy(remote_host, _p1 + 1, (int)(_p3 - _p1) - 1);
+
+			*remote_port = 80;
+		}
+
+
+		return 0;
+	}
+
+
+	char* p = strstr(header, "Host:");
+	if (!p)
+	{
+		return BAD_HTTP_PROTOCOL;
+	}
+	char* p1 = strchr(p, '\n');
+	if (!p1)
+	{
+		return BAD_HTTP_PROTOCOL;
+	}
+
+	char* p2 = strchr(p + 5, ':'); /* 5是指'Host:'的长度 */
+
+	if (p2 && p2 < p1)
+	{
+
+		int p_len = (int)(p1 - p2 - 1);
+		char s_port[p_len];
+		strncpy(s_port, p2 + 1, p_len);
+		s_port[p_len] = '\0';
+		*remote_port = atoi(s_port);
+
+		int h_len = (int)(p2 - p - 5 - 1);
+
+		memset(remote_host, 0, sizeof(remote_host));
+		strncpy(remote_host, p + 5 + 1, h_len); //Host:
+		//assert h_len < 128;
+		remote_host[h_len] = '\0';
+	}
+	else
+	{
+		int h_len = (int)(p1 - p - 5 - 1 - 1);
+		memset(remote_host, 0, sizeof(remote_host));
+		strncpy(remote_host, p + 5 + 1, h_len);
+		//assert h_len < 128;
+		remote_host[h_len] = '\0';
+		*remote_port = 80;
+	}
+	return 0;
+}
+
+
 
 int extract_host(const char* header)
 {
@@ -483,6 +589,9 @@ void handle_client_fromproxy(int client_sock, struct sockaddr_in client_addr) {
 	close(client_sock);
 }
 */
+
+
+
 void handle_client_fromclient(int client_sock, struct sockaddr_in client_addr) {
 	int is_http_tunnel = 0;
 
@@ -554,22 +663,54 @@ void handle_client_fromclient(int client_sock, struct sockaddr_in client_addr) {
 /* 处理客户端的连接 */
 void handle_client(int client_sock, struct sockaddr_in client_addr)
 {
+	//启动命令参数有远程，则后面的read_header解码需要解密
+	if  (strlen(remote_host) == 0) {
+		bProxy = 1;
+	}
+	else {
+		bProxy = 0;
+	}
+	
 	if (read_header(client_sock, header_buffer) < 0)
 	{
 		LOG("Read Http header failed\n");
 		return;
 	}
 
-	if (strstr(header_buffer, "google.com") != 0) {
-		bProxy = 1;
+	//
+	char dom[128] = { 0 };
+	char ip[64] = {0};
+	int port;
+	get_host(header_buffer, dom, &port);
+	socket_resolver(dom, ip);
+	
+	char url[4096] = { 0 };
+	char* buf = 0;
+	int ret;
+	sprintf(url, "http://ip.taobao.com/service/getIpInfo.php?ip=%s", ip);
+	ret = http_get(url, &buf);        // Downloads page
+	if (ret==-1 || strstr(buf, "中国") != 0) {
+		bProxy = 0;
+		LOG("Proxy %s is false\n", dom);
 	}
+	else {
+		bProxy = 1;
+		LOG("Proxy %s is true\n", dom);
+	}
+
+	if (ret != -1) {
+		free(buf);
+	}
+	
 
 	//直接一级代理
 	if (bProxy == 0 || strlen(remote_host) == 0) {
+		LOG("Enter handle_client_fromclient\n");
 		handle_client_fromclient(client_sock, client_addr);
 	}
 	//二级代理
 	else {
+		LOG("Enter handle_client_fromproxy\n");
 		handle_client_fromproxy(client_sock, client_addr);
 	}
 }
@@ -615,7 +756,6 @@ int receive_data(int socket, char* buffer, int len)
 		for (i = 0; i < n; i++)
 		{
 			buffer[i] ^= 1;
-			// printf("%d => %d\n",c,buffer[i]);
 		}
 	}
 
