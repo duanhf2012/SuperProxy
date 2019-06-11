@@ -57,9 +57,10 @@ int remote_sock;
 
 
 
-
+int is_http_tunnel = 0;
 char * header_buffer ;
 
+#define DEBUG
 
 enum 
 {
@@ -199,13 +200,15 @@ int extract_host(const char * header)
             char s_port[10];
             bzero(s_port,10);
 
+			memset(remote_host, 0, sizeof(remote_host));
             strncpy(remote_host,_p1+1,(int)(_p2  - _p1) - 1);
             strncpy(s_port,_p2+1,(int) (_p3 - _p2) -1);
             remote_port = atoi(s_port);
-
         } else 
         {
+			memset(remote_host, 0, sizeof(remote_host));
             strncpy(remote_host,_p1+1,(int)(_p3  - _p1) -1);
+			
             remote_port = 80;
         }
         
@@ -237,12 +240,15 @@ int extract_host(const char * header)
         remote_port = atoi(s_port);
 
         int h_len = (int)(p2 - p -5 -1 );
+
+		memset(remote_host, 0, sizeof(remote_host));
         strncpy(remote_host,p + 5 + 1  ,h_len); //Host:
         //assert h_len < 128;
         remote_host[h_len] = '\0';
     } else 
     {   
         int h_len = (int)(p1 - p - 5 -1 -1); 
+		memset(remote_host, 0, sizeof(remote_host));
         strncpy(remote_host,p + 5 + 1,h_len);
         //assert h_len < 128;
         remote_host[h_len] = '\0';
@@ -322,7 +328,6 @@ void get_info(char * output)
 
 const char * get_work_mode() 
 {
-
     if(strlen(remote_host) == 0) 
     {
         if(io_flag == FLG_NONE) 
@@ -332,7 +337,6 @@ const char * get_work_mode()
         {
            return "start as remote forward proxy and do decode data when recevie data" ;
         }
-        
     } else 
     {
         if(io_flag == FLG_NONE) 
@@ -348,97 +352,307 @@ const char * get_work_mode()
 
 }
 
+int bProxy = 0;
+
+
+
+
+void handle_client_fromproxy1(int client_sock, struct sockaddr_in client_addr) {
+	printf("host:%s\n", remote_host);
+	if (bProxy == 0 || strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
+	{
+#ifdef DEBUG
+		LOG(" ============ handle new client ============\n");
+		LOG(">>>Header:%s\n", header_buffer);
+#endif
+		/*
+		if(read_header(client_sock,header_buffer) < 0)
+		{
+			LOG("Read Http header failed\n");
+			return;
+		} else
+		{*/
+		char* p = strstr(header_buffer, "CONNECT"); /* 判断是否是http 隧道请求 */
+		if (p)
+		{
+			LOG("receive CONNECT request\n");
+			is_http_tunnel = 1;
+		}
+
+		if (strstr(header_buffer, "GET /mproxy") > 0)
+		{
+			LOG("====== hand mproxy info request ====");
+			//返回mproxy的运行基本信息
+			hand_mproxy_info_req(client_sock, header_buffer);
+
+			return;
+		}
+
+		if (extract_host(header_buffer) < 0)
+		{
+			LOG("Cannot extract host field,bad http protrotol");
+			return;
+		}
+		LOG("Host:%s port: %d io_flag:%d\n", remote_host, remote_port, io_flag);
+
+		// }
+	}
+
+	if (bProxy == 0) {
+		LOG("start connect to host [%s:%d] proxy is false\n", remote_host, remote_port);
+	}
+	else {
+		LOG("start connect to host [%s:%d] proxy is true\n", remote_host, remote_port);
+	}
+
+	if ((remote_sock = create_connection()) < 0) {
+		LOG("Cannot connect to host [%s:%d]\n", remote_host, remote_port);
+		return;
+	}
+
+	if (fork() == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
+
+		if (bProxy == 0)
+		{
+			LOG("cccccc [%s:%d]\n", remote_host, remote_port);
+			forward_header(remote_sock); //普通的http请求先转发header
+		}
+		else {
+			send_data(remote_sock, header_buffer, strlen(header_buffer));
+			LOG("dddddddddd:%s\n", header_buffer);
+		}
+
+
+		forward_data(client_sock, remote_sock);
+		exit(0);
+	}
+
+	if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
+
+		if (io_flag == W_S_ENC)
+		{
+			io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+		}
+		else if (io_flag == R_C_DEC)
+		{
+			io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+		}
+
+		if (is_http_tunnel)
+		{
+			send_tunnel_ok(client_sock);
+		}
+
+		forward_data(remote_sock, client_sock);
+		exit(0);
+	}
+
+	close(remote_sock);
+	close(client_sock);
+}
+
+/*
+void handle_client_fromproxy(int client_sock, struct sockaddr_in client_addr) {
+	int is_http_tunnel = 0;
+	if (strlen(remote_host) == 0) // 未指定远端主机名称从http 请求 HOST 字段中获取 
+	{
+
+#ifdef DEBUG
+		LOG(" ============ handle new client ============\n");
+		LOG(">>>Header:%s\n", header_buffer);
+#endif
+
+		if (read_header(client_sock, header_buffer) < 0)
+		{
+			LOG("Read Http header failed\n");
+			return;
+		}
+		else
+		{
+			char* p = strstr(header_buffer, "CONNECT"); // 判断是否是http 隧道请求 
+			if (p)
+			{
+				LOG("receive CONNECT request\n");
+				is_http_tunnel = 1;
+			}
+
+			if (strstr(header_buffer, "GET /mproxy") > 0)
+			{
+				LOG("====== hand mproxy info request ====");
+				//返回mproxy的运行基本信息
+				hand_mproxy_info_req(client_sock, header_buffer);
+
+				return;
+			}
+
+			if (extract_host(header_buffer) < 0)
+			{
+				LOG("Cannot extract host field,bad http protrotol");
+				return;
+			}
+			LOG("Host:%s port: %d io_flag:%d\n", remote_host, remote_port, io_flag);
+
+		}
+	}
+
+	if ((remote_sock = create_connection()) < 0) {
+		LOG("Cannot connect to host [%s:%d]\n", remote_host, remote_port);
+		return;
+	}
+
+	if (fork() == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
+
+		if (strlen(header_buffer) > 0 && !is_http_tunnel)
+		{
+			forward_header(remote_sock); //普通的http请求先转发header
+		}
+
+		forward_data(client_sock, remote_sock);
+		exit(0);
+	}
+
+	if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
+
+		if (io_flag == W_S_ENC)
+		{
+			io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+		}
+		else if (io_flag == R_C_DEC)
+		{
+			io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+		}
+
+		if (is_http_tunnel)
+		{
+			send_tunnel_ok(client_sock);
+		}
+
+		forward_data(remote_sock, client_sock);
+		exit(0);
+	}
+
+	close(remote_sock);
+	close(client_sock);
+}
+*/
+void handle_client_fromclient(int client_sock, struct sockaddr_in client_addr) {
+	int is_http_tunnel = 0;
+	//if (strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
+	{
+
+#ifdef DEBUG
+		LOG(" ============ handle new client ============\n");
+		LOG(">>>Header:%s\n", header_buffer);
+#endif
+
+		/*if (read_header(client_sock, header_buffer) < 0)
+		{
+			LOG("Read Http header failed\n");
+			return;
+		}
+		else*/
+		{
+			char* p = strstr(header_buffer, "CONNECT"); /* 判断是否是http 隧道请求 */
+			if (p)
+			{
+				LOG("receive CONNECT request\n");
+				is_http_tunnel = 1;
+			}
+
+			if (strstr(header_buffer, "GET /mproxy") > 0)
+			{
+				LOG("====== hand mproxy info request ====");
+				//返回mproxy的运行基本信息
+				hand_mproxy_info_req(client_sock, header_buffer);
+
+				return;
+			}
+
+			if (extract_host(header_buffer) < 0)
+			{
+				LOG("Cannot extract host field,bad http protrotol");
+				return;
+			}
+			LOG("Host:%s port: %d io_flag:%d\n", remote_host, remote_port, io_flag);
+
+		}
+	}
+
+	if ((remote_sock = create_connection()) < 0) {
+		LOG("Cannot connect to host [%s:%d]\n", remote_host, remote_port);
+		return;
+	}
+
+	if (fork() == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
+
+		if (strlen(header_buffer) > 0 && !is_http_tunnel)
+		{
+			forward_header(remote_sock); //普通的http请求先转发header
+		}
+
+		forward_data(client_sock, remote_sock);
+		exit(0);
+	}
+
+	if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
+
+		if (io_flag == W_S_ENC)
+		{
+			io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+		}
+		else if (io_flag == R_C_DEC)
+		{
+			io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+		}
+
+		if (is_http_tunnel)
+		{
+			send_tunnel_ok(client_sock);
+		}
+
+		forward_data(remote_sock, client_sock);
+		exit(0);
+	}
+
+	close(remote_sock);
+	close(client_sock);
+}
+
+
 /* 处理客户端的连接 */
 void handle_client(int client_sock, struct sockaddr_in client_addr)
 {
-    int is_http_tunnel = 0; 
-    if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
-    {
-        
-        #ifdef DEBUG
-        LOG(" ============ handle new client ============\n");
-        LOG(">>>Header:%s\n",header_buffer);
-        #endif
-        
-        if(read_header(client_sock,header_buffer) < 0)
-        {
-            LOG("Read Http header failed\n");
-            return;
-        } else 
-        {
-            char * p = strstr(header_buffer,"CONNECT"); /* 判断是否是http 隧道请求 */
-            if(p) 
-            {
-                LOG("receive CONNECT request\n");
-                is_http_tunnel = 1;
-            }
+	
 
-            if(strstr(header_buffer,"GET /mproxy") >0 ) 
-            {
-                LOG("====== hand mproxy info request ====");
-                //返回mproxy的运行基本信息
-                hand_mproxy_info_req(client_sock,header_buffer);
+	if (read_header(client_sock, header_buffer) < 0)
+	{
+		LOG("Read Http header failed\n");
+		return;
+	}
 
-                return; 
-            }
+	if (strstr(header_buffer, "google.com") != 0) {
+		bProxy = 1;
+	}
 
-            if(extract_host(header_buffer) < 0) 
-            {
-                LOG("Cannot extract host field,bad http protrotol");
-                return;
-            }
-            LOG("Host:%s port: %d io_flag:%d\n",remote_host,remote_port,io_flag);
-
-        }
-    }
-
-    if ((remote_sock = create_connection()) < 0) {
-        LOG("Cannot connect to host [%s:%d]\n",remote_host,remote_port);
-        return;
-    }
-
-    if (fork() == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
-
-        if(strlen(header_buffer) > 0 && !is_http_tunnel) 
-        {
-            forward_header(remote_sock); //普通的http请求先转发header
-        } 
-        
-        forward_data(client_sock, remote_sock);
-        exit(0);
-    }
-
-    if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
-
-        if(io_flag == W_S_ENC)
-        {
-            io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-        } else if (io_flag == R_C_DEC)
-        {
-             io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
-        }
-
-        if(is_http_tunnel)
-        {
-            send_tunnel_ok(client_sock);
-        } 
-
-        forward_data(remote_sock, client_sock);
-        exit(0);
-    }
-
-    close(remote_sock);
-    close(client_sock);
+	if (bProxy == 0 || strlen(remote_host) == 0) {
+		handle_client_fromclient(client_sock, client_addr);
+	}
+	else {
+		handle_client_fromproxy(client_sock, client_addr);
+	}
 }
+
+
 
 void forward_header(int destination_sock)
 {
+	LOG("<<<<<<<%s\n", header_buffer);
     rewrite_header();
     #ifdef DEBUG
         LOG("================ The Forward HEAD =================");
         LOG("%s\n",header_buffer);
     #endif
-   
+	LOG(">>>>>>%s\n", header_buffer);
     int len = strlen(header_buffer);
     send_data(destination_sock,header_buffer,len) ;
 }
@@ -446,7 +660,7 @@ void forward_header(int destination_sock)
 int send_data(int socket,char * buffer,int len)
 {
 
-    if(io_flag == W_S_ENC)
+    if(io_flag == W_S_ENC && bProxy == 1)
     {
         int i;
         for(i = 0; i < len ; i++)
@@ -461,8 +675,9 @@ int send_data(int socket,char * buffer,int len)
 
 int receive_data(int socket, char * buffer, int len)
 {
+
     int n = recv(socket, buffer, len, 0);
-    if(io_flag == R_C_DEC && n > 0)
+    if(bProxy == 1 && io_flag == R_C_DEC && n > 0)
     {
         int i; 
         for(i = 0; i< n; i++ )
@@ -480,8 +695,13 @@ int receive_data(int socket, char * buffer, int len)
 /* 代理中的完整URL转发前需改成 path 的形式 */
 void rewrite_header()
 {
+	//printf("header_buffer,%d\n", int(header_buffer));
     char * p = strstr(header_buffer,"http://");
-    char * p0 = strchr(p,'\0');
+	char* p0 = 0;
+	if (p != 0) {
+		p0 = strchr(p, '\0');
+	}
+    //char * p0 = strchr(p,'\0');
     char * p5 = strstr(header_buffer,"HTTP/"); /* "HTTP/" 是协议标识 如 "HTTP/1.1" */
     int len = strlen(header_buffer);
     if(p)
@@ -684,11 +904,13 @@ int _main(int argc, char *argv[])
 				p = strchr(optarg, ':');
 				if(p)
 				{
+					memset(remote_host, 0, sizeof(remote_host));
 					strncpy(remote_host, optarg, p - optarg);
 					remote_port = atoi(p+1);
 				}
 				else
 				{
+					memset(remote_host, 0, sizeof(remote_host));
 					strncpy(remote_host, optarg, strlen(remote_host));
 				}
 				break;
