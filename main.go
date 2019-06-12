@@ -14,7 +14,10 @@ import (
 )
 
 var remoteip string
+var localProxy string //用于非境外ip不翻墙
 var ssl bool
+
+var mapDomain Map
 
 func main() {
 	ssl = true
@@ -84,6 +87,11 @@ func main() {
 			log.Panic(err)
 		}
 		remoteip = parts[2]
+
+		if len(parts) > 3 {
+			//
+			localProxy = parts[3]
+		}
 		fmt.Printf("Server start listen %s,remote is %s.\n", localport, remoteip)
 	} else {
 		fmt.Printf("param is error!\n")
@@ -171,39 +179,57 @@ func copyBuffer(dst io.Writer, src io.Reader, encodeType int) (written int64, er
 }
 
 func handleFromWebClientRequest(client net.Conn) {
+	var tmpRemoteip string
 	if client == nil {
 		return
 	}
 
 	defer client.Close()
+	var b [4096]byte
+	n, rerr := client.Read(b[:])
+	if rerr != nil {
+		log.Println(rerr)
+		return
+	}
+
+	var method, host string
+	fmt.Sscanf(string(b[:bytes.IndexByte(b[:n], '\n')]), "%s%s", &method, &host)
+
+	if localProxy != "" && IsChinaHost(host) == true {
+		fmt.Printf("host:%s proxy is false\n", host)
+		tmpRemoteip = localProxy
+	} else {
+		fmt.Printf("host:%s proxy is true\n", host)
+		tmpRemoteip = remoteip
+	}
+
 	var server net.Conn
 	var err error
 	if ssl == true {
 		conf := &tls.Config{
 			InsecureSkipVerify: true,
 		}
-		server, err = tls.Dial("tcp", remoteip, conf)
+		server, err = tls.Dial("tcp", tmpRemoteip, conf)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 	} else {
 		//获得了请求的host和port，就开始拨号吧
-		server, err = net.Dial("tcp", remoteip)
+		server, err = net.Dial("tcp", tmpRemoteip)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 	}
 
-	//获得了请求的host和port，就开始拨号吧
-	/*
-		server, err := net.Dial("tcp", remoteip)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-	*/
+	defer server.Close()
+	transMsg := XorEncodeStr(b[:n], nil)
+	_, ew := server.Write(transMsg[:n])
+	if ew != nil {
+		log.Println(err)
+		return
+	}
 	go copyBuffer(server, client, 1)
 	copyBuffer(client, server, 2)
 }
@@ -211,6 +237,10 @@ func handleFromWebClientRequest(client net.Conn) {
 func IsChinaHost(host string) bool {
 	parts := strings.Split(host, ":")
 	host = parts[0]
+	has := mapDomain.Get(host)
+	if has != nil {
+		return has.(bool)
+	}
 
 	address, err := net.LookupHost(host)
 	if err != nil || len(address) < 1 {
@@ -230,9 +260,10 @@ func IsChinaHost(host string) bool {
 
 	bfind := strings.Index(string(b), "中国")
 	if bfind == -1 {
+		mapDomain.Set(host, false)
 		return false
 	}
-
+	mapDomain.Set(host, true)
 	return true
 }
 
@@ -252,17 +283,23 @@ func handleFromClientRequest(client net.Conn) {
 	bdcode := XorDecodeStr(b[:n], nil)
 
 	var method, host string
-	fmt.Sscanf(string(bdcode[:bytes.IndexByte(bdcode[:], '\n')]), "%s%s", &method, &host)
+	findId := bytes.IndexByte(bdcode[:], '\n')
+	if findId == -1 {
+		fmt.Printf("Data is error:%s\n", bdcode)
+		return
+	}
+	fmt.Sscanf(string(bdcode[:findId]), "%s%s", &method, &host)
 
 	//获得了请求的host和port，就开始拨号吧
 	server, err := net.Dial("tcp", host)
 	if err != nil {
-		fmt.Printf("Connect %s is fail!", host)
+		fmt.Printf("Connect %s is fail!\n", host)
 		log.Println(err)
 		return
 	}
 
-	fmt.Printf("Connect %s is succ!", host)
+	defer server.Close()
+	fmt.Printf("Connect %s is succ!\n", host)
 	if method == "CONNECT" {
 		ret := XorEncodeStr([]byte("HTTP/1.1 200 Connection established\r\n\r\n"), nil)
 		fmt.Fprint(client, string(ret))
