@@ -14,15 +14,10 @@ import (
 )
 
 var remoteip string
-var key string
-
 var ssl bool
 
 func main() {
 	ssl = true
-	key = "9"
-	remoteip = "159.138.26.110:9001"
-
 	if len(os.Args) < 2 {
 		fmt.Printf("param is error!\n")
 		return
@@ -34,7 +29,6 @@ func main() {
 
 	parts := strings.Split(os.Args[1], " ")
 	for i := 2; i < len(os.Args); i++ {
-		//
 		parts = append(parts, os.Args[i])
 	}
 
@@ -145,9 +139,9 @@ func copyBuffer(dst io.Writer, src io.Reader, encodeType int) (written int64, er
 		if nr > 0 {
 			var ret []byte
 			if encodeType == 1 {
-				ret = XorEncodeStr(buf[0:nr], []byte(key))
+				ret = XorEncodeStr(buf[0:nr], nil)
 			} else if encodeType == 2 {
-				ret = XorDecodeStr(buf[0:nr], []byte(key))
+				ret = XorDecodeStr(buf[0:nr], nil)
 
 			} else {
 				ret = buf
@@ -255,7 +249,7 @@ func handleFromClientRequest(client net.Conn) {
 		return
 	}
 
-	bdcode := XorDecodeStr(b[:n], []byte(key))
+	bdcode := XorDecodeStr(b[:n], nil)
 
 	var method, host string
 	fmt.Sscanf(string(bdcode[:bytes.IndexByte(bdcode[:], '\n')]), "%s%s", &method, &host)
@@ -270,7 +264,7 @@ func handleFromClientRequest(client net.Conn) {
 
 	fmt.Printf("Connect %s is succ!", host)
 	if method == "CONNECT" {
-		ret := XorEncodeStr([]byte("HTTP/1.1 200 Connection established\r\n\r\n"), []byte(key))
+		ret := XorEncodeStr([]byte("HTTP/1.1 200 Connection established\r\n\r\n"), nil)
 		fmt.Fprint(client, string(ret))
 	} else {
 		server.Write(bdcode[:n])
