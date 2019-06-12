@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,7 +16,10 @@ import (
 var remoteip string
 var key string
 
+var ssl bool
+
 func main() {
+	ssl = true
 	key = "9"
 	remoteip = "159.138.26.110:9001"
 
@@ -50,9 +54,23 @@ func main() {
 			fmt.Printf("listen port is error!\n")
 			return
 		}
-		l, err = net.Listen("tcp", listenip)
-		if err != nil {
-			log.Panic(err)
+
+		if ssl == true {
+			cer, err := tls.LoadX509KeyPair("cert.pem", "key.pem")
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			config := &tls.Config{Certificates: []tls.Certificate{cer}}
+			l, err = tls.Listen("tcp", listenip, config)
+			if err != nil {
+				log.Panic(err)
+			}
+		} else {
+			l, err = net.Listen("tcp", listenip)
+			if err != nil {
+				log.Panic(err)
+			}
 		}
 
 		fmt.Printf("Server start listen %s.\n", listenip)
@@ -74,10 +92,12 @@ func main() {
 		remoteip = parts[2]
 		fmt.Printf("Server start listen %s,remote is %s.\n", localport, remoteip)
 	} else {
-
+		fmt.Printf("param is error!\n")
+		return
 	}
 
 	for {
+
 		client, err := l.Accept()
 		if err != nil {
 			log.Panic(err)
@@ -162,13 +182,34 @@ func handleFromWebClientRequest(client net.Conn) {
 	}
 
 	defer client.Close()
-	//获得了请求的host和port，就开始拨号吧
-	server, err := net.Dial("tcp", remoteip)
-	if err != nil {
-		log.Println(err)
-		return
+	var server net.Conn
+	var err error
+	if ssl == true {
+		conf := &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		server, err = tls.Dial("tcp", remoteip, conf)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	} else {
+		//获得了请求的host和port，就开始拨号吧
+		server, err = net.Dial("tcp", remoteip)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 	}
 
+	//获得了请求的host和port，就开始拨号吧
+	/*
+		server, err := net.Dial("tcp", remoteip)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	*/
 	go copyBuffer(server, client, 1)
 	copyBuffer(client, server, 2)
 }
