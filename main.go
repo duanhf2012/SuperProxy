@@ -4,31 +4,20 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
-	"net/url"
+	"net/http"
 	"os"
 	"strings"
 )
 
 var remoteip string
-var clientip string
 var key string
 
 func main() {
 	key = "9"
-	/*
-		var str1 string
-
-		str1 = "helloaf&93)+"
-
-		ret1 := XorEncodeStr([]byte(str1), []byte(key))
-		ret2 := XorDecodeStr(ret1, []byte(key))
-		fmt.Printf("%s,%s", string(ret1), string(ret2))
-	*/
 	remoteip = "159.138.26.110:9001"
-	//remoteip = "127.0.0.1:9001"
-	clientip = "127.0.0.1:8081"
 
 	if len(os.Args) < 2 {
 		fmt.Printf("param is error!\n")
@@ -38,16 +27,54 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	var l net.Listener
 	var err error
-	if os.Args[1] == "-s" {
-		l, err = net.Listen("tcp", ":9001")
+
+	parts := strings.Split(os.Args[1], " ")
+	for i := 2; i < len(os.Args); i++ {
+		//
+		parts = append(parts, os.Args[i])
+	}
+
+	for i := 0; i < len(parts); i++ {
+		parts[i] = strings.Trim(parts[i], "\"")
+		parts[i] = strings.Trim(parts[i], " ")
+	}
+
+	if parts[0] == "-s" {
+		if len(parts) < 2 {
+			fmt.Printf("-s param is erro!\n")
+			return
+		}
+
+		listenip := parts[1]
+		if strings.Index(listenip, ":") == -1 {
+			fmt.Printf("listen port is error!\n")
+			return
+		}
+		l, err = net.Listen("tcp", listenip)
 		if err != nil {
 			log.Panic(err)
 		}
+
+		fmt.Printf("Server start listen %s.\n", listenip)
+	} else if parts[0] == "-c" {
+		if len(parts) < 3 {
+			fmt.Printf("-c param is error\n")
+			return
+		}
+		localport := parts[1]
+		if strings.Index(localport, ":") == -1 {
+			fmt.Printf("isten port is error!\n")
+			return
+		}
+
+		l, err = net.Listen("tcp", localport)
+		if err != nil {
+			log.Panic(err)
+		}
+		remoteip = parts[2]
+		fmt.Printf("Server start listen %s,remote is %s.\n", localport, remoteip)
 	} else {
-		l, err = net.Listen("tcp", ":8081")
-		if err != nil {
-			log.Panic(err)
-		}
+
 	}
 
 	for {
@@ -56,7 +83,7 @@ func main() {
 			log.Panic(err)
 		}
 
-		if os.Args[1] == "-s" {
+		if parts[0] == "-s" {
 			go handleFromClientRequest(client)
 		} else {
 
@@ -68,13 +95,9 @@ func main() {
 }
 
 func XorEncodeStr(msg, key []byte) []byte {
-	//return msg
 	ml := len(msg)
-	//kl := len(key)
-
 	var pwd []byte
 	for i := 0; i < ml; i++ {
-		//pwd = append(pwd, (key[i%kl])^(msg[i]))
 		pwd = append(pwd, ((msg[i]) ^ 1))
 	}
 
@@ -82,11 +105,7 @@ func XorEncodeStr(msg, key []byte) []byte {
 }
 
 func XorDecodeStr(msg, key []byte) []byte {
-	//return msg
 	ml := len(msg)
-
-	//kl := len(key)
-
 	var pwd []byte
 	for i := 0; i < ml; i++ {
 		//pwd = append(pwd, (msg[i] ^ key[i%kl]))
@@ -100,20 +119,16 @@ func XorDecodeStr(msg, key []byte) []byte {
 // copyBuffer is the actual implementation of Copy and CopyBuffer.
 // if buf is nil, one is allocated.
 func copyBuffer(dst io.Writer, src io.Reader, encodeType int) (written int64, err error) {
-
 	buf := make([]byte, 4096)
-
 	for {
 		nr, er := src.Read(buf)
 		if nr > 0 {
-
 			var ret []byte
 			if encodeType == 1 {
-				fmt.Printf("<<read:Encode[[%s]]\n", string(buf[0:nr]))
 				ret = XorEncodeStr(buf[0:nr], []byte(key))
 			} else if encodeType == 2 {
 				ret = XorDecodeStr(buf[0:nr], []byte(key))
-				fmt.Printf("<<read:Decode[[%s]]\n", string(ret))
+
 			} else {
 				ret = buf
 			}
@@ -154,13 +169,36 @@ func handleFromWebClientRequest(client net.Conn) {
 		return
 	}
 
-	//go Copy(server, client, 0)
-	//Copy(client, server, 0)
-
 	go copyBuffer(server, client, 1)
 	copyBuffer(client, server, 2)
-	//go io.Copy(server, client)
-	//io.Copy(client, server)
+}
+
+func IsChinaHost(host string) bool {
+	parts := strings.Split(host, ":")
+	host = parts[0]
+
+	address, err := net.LookupHost(host)
+	if err != nil || len(address) < 1 {
+		return false
+	}
+
+	resp, errs := http.Get(fmt.Sprintf("http://ip.taobao.com/service/getIpInfo.php?ip=%s", address[0]))
+	if errs != nil {
+		return false
+	}
+
+	defer resp.Body.Close()
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+
+	bfind := strings.Index(string(b), "中国")
+	if bfind == -1 {
+		return false
+	}
+
+	return true
 }
 
 func handleFromClientRequest(client net.Conn) {
@@ -177,37 +215,21 @@ func handleFromClientRequest(client net.Conn) {
 	}
 
 	bdcode := XorDecodeStr(b[:n], []byte(key))
-	fmt.Printf("==>[[[%s]]]\n\n", string(bdcode))
 
-	var method, host, address string
+	var method, host string
 	fmt.Sscanf(string(bdcode[:bytes.IndexByte(bdcode[:], '\n')]), "%s%s", &method, &host)
-	hostPortURL, err := url.Parse(host)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	fmt.Printf("method:%s,host:%s\n", method, host)
-	if hostPortURL.Opaque == "443" { //https访问
-		address = hostPortURL.Scheme + ":443"
-	} else { //http访问
-		if strings.Index(hostPortURL.Host, ":") == -1 { //host不带端口， 默认80
-			address = hostPortURL.Host + ":80"
-		} else {
-			address = hostPortURL.Host
-		}
-	}
 
 	//获得了请求的host和port，就开始拨号吧
-	server, err := net.Dial("tcp", address)
+	server, err := net.Dial("tcp", host)
 	if err != nil {
+		fmt.Printf("Connect %s is fail!", host)
 		log.Println(err)
 		return
 	}
-	if method == "CONNECT" {
 
+	fmt.Printf("Connect %s is succ!", host)
+	if method == "CONNECT" {
 		ret := XorEncodeStr([]byte("HTTP/1.1 200 Connection established\r\n\r\n"), []byte(key))
-		//fmt.Fprint(client, "HTTP/1.1 200 Connection established\r\n\r\n")
 		fmt.Fprint(client, string(ret))
 	} else {
 		server.Write(bdcode[:n])
@@ -216,7 +238,4 @@ func handleFromClientRequest(client net.Conn) {
 	//进行转发
 	go copyBuffer(client, server, 1)
 	copyBuffer(server, client, 2)
-
-	//go io.Copy(server, client)
-	//io.Copy(client, server)
 }
