@@ -281,7 +281,7 @@ func handleFromClientRequest(client net.Conn) {
 	}
 
 	bdcode := XorDecodeStr(b[:n], nil)
-
+	fmt.Printf(">>>>>%s>>>>\n", string(bdcode[:]))
 	var method, host string
 	findId := bytes.IndexByte(bdcode[:], '\n')
 	if findId == -1 {
@@ -289,6 +289,32 @@ func handleFromClientRequest(client net.Conn) {
 		return
 	}
 	fmt.Sscanf(string(bdcode[:findId]), "%s%s", &method, &host)
+
+	strmsg := string(bdcode[:])
+	fmt.Printf("......%s\n", strmsg)
+	if strings.Index(strmsg, "CONNECT") == -1 {
+		start := strings.Index(strmsg, "Host:")
+		if start == -1 {
+			fmt.Printf("fail:%s\n", host)
+			return
+		}
+		end := strings.Index(strmsg[start+5:], "\n")
+		if end == -1 {
+			fmt.Printf("222fail:%s\n", host)
+			return
+		}
+		start += 5
+		fmt.Printf("[%s,%d,%d]", strmsg, start, end)
+		substr := strmsg[start : start+end]
+		substr = strings.TrimSpace(substr)
+		parts := strings.Split(substr, ":")
+		if len(parts) < 2 {
+			substr += ":80"
+		}
+
+		host = substr
+		fmt.Printf("..........%s...\n", substr)
+	}
 
 	//获得了请求的host和port，就开始拨号吧
 	server, err := net.Dial("tcp", host)
@@ -304,6 +330,7 @@ func handleFromClientRequest(client net.Conn) {
 		ret := XorEncodeStr([]byte("HTTP/1.1 200 Connection established\r\n\r\n"), nil)
 		fmt.Fprint(client, string(ret))
 	} else {
+
 		server.Write(bdcode[:n])
 	}
 
