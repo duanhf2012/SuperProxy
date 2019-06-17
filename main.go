@@ -78,7 +78,7 @@ func main() {
 		}
 		localport := parts[1]
 		if strings.Index(localport, ":") == -1 {
-			fmt.Printf("isten port is error!\n")
+			fmt.Printf("listen port is error!\n")
 			return
 		}
 
@@ -155,20 +155,27 @@ func copyBuffer(dst io.Writer, src io.Reader, encodeType int) (written int64, er
 				ret = buf
 			}
 
+			//fmt.Printf("cpyb:[%s]", string(ret[0:nr]))
 			nw, ew := dst.Write(ret[0:nr])
+
 			if nw > 0 {
 				written += int64(nw)
 			}
 			if ew != nil {
+				//fmt.Printf("error1:%d,%s\n", encodeType, ew)
+
 				err = ew
 				break
 			}
 			if nr != nw {
 				err = io.ErrShortWrite
+				//fmt.Printf("error2:%d,%s\n", encodeType, ew)
+
 				break
 			}
 		}
 		if er != nil {
+			//fmt.Printf("error3:%d,%s\n", encodeType, er)
 			if er != io.EOF {
 				err = er
 			}
@@ -192,14 +199,15 @@ func handleFromWebClientRequest(client net.Conn) {
 		return
 	}
 
+	//fmt.Printf("=====recv:[%s]\n\n", string(b[:]))
 	var method, host string
 	fmt.Sscanf(string(b[:bytes.IndexByte(b[:n], '\n')]), "%s%s", &method, &host)
 
 	if localProxy != "" && IsChinaHost(host) == true {
-		fmt.Printf("host:%s proxy is false\n", host)
+		//fmt.Printf("host:%s proxy is false\n", host)
 		tmpRemoteip = localProxy
 	} else {
-		fmt.Printf("host:%s proxy is true\n", host)
+		//fmt.Printf("host:%s proxy is true\n", host)
 		tmpRemoteip = remoteip
 	}
 
@@ -281,30 +289,30 @@ func handleFromClientRequest(client net.Conn) {
 	}
 
 	bdcode := XorDecodeStr(b[:n], nil)
-	fmt.Printf(">>>>>%s>>>>\n", string(bdcode[:]))
+	//	fmt.Printf("\n<<%s>>\n", string(bdcode[:]))
 	var method, host string
 	findId := bytes.IndexByte(bdcode[:], '\n')
 	if findId == -1 {
-		fmt.Printf("Data is error:%s\n", bdcode)
+		//		fmt.Printf("Data is error:%s\n", bdcode)
 		return
 	}
 	fmt.Sscanf(string(bdcode[:findId]), "%s%s", &method, &host)
 
 	strmsg := string(bdcode[:])
-	fmt.Printf("......%s\n", strmsg)
+	//fmt.Printf("......%s\n", strmsg)
 	if strings.Index(strmsg, "CONNECT") == -1 {
-		start := strings.Index(strmsg, "Host:")
+		start := strings.Index(strings.ToLower(strmsg), "host:")
 		if start == -1 {
-			fmt.Printf("fail:%s\n", host)
+			//fmt.Printf("fail:%s\n", host)
 			return
 		}
 		end := strings.Index(strmsg[start+5:], "\n")
 		if end == -1 {
-			fmt.Printf("222fail:%s\n", host)
+			//fmt.Printf("222fail:%s\n", host)
 			return
 		}
 		start += 5
-		fmt.Printf("[%s,%d,%d]", strmsg, start, end)
+		//fmt.Printf("[%s,%d,%d]", strmsg, start, end)
 		substr := strmsg[start : start+end]
 		substr = strings.TrimSpace(substr)
 		parts := strings.Split(substr, ":")
@@ -313,7 +321,7 @@ func handleFromClientRequest(client net.Conn) {
 		}
 
 		host = substr
-		fmt.Printf("..........%s...\n", substr)
+		//fmt.Printf("..........%s...\n", substr)
 	}
 
 	//获得了请求的host和port，就开始拨号吧
@@ -330,11 +338,11 @@ func handleFromClientRequest(client net.Conn) {
 		ret := XorEncodeStr([]byte("HTTP/1.1 200 Connection established\r\n\r\n"), nil)
 		fmt.Fprint(client, string(ret))
 	} else {
-
 		server.Write(bdcode[:n])
 	}
 
 	//进行转发
-	go copyBuffer(client, server, 1)
-	copyBuffer(server, client, 2)
+	go copyBuffer(server, client, 2)
+	copyBuffer(client, server, 1)
+
 }
