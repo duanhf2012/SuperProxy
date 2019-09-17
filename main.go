@@ -198,8 +198,10 @@ func handleFromWebClientRequest(client net.Conn) {
 		log.Println(rerr)
 		return
 	}
-
-	//fmt.Printf("=====recv:[%s]\n\n", string(b[:]))
+    if n<4 {
+	  return
+	}
+	//fmt.Printf("=====recv:[%s,%d,%+v]\n\n", string(b[:]),n,b)
 	var method, host string
 	fmt.Sscanf(string(b[:bytes.IndexByte(b[:n], '\n')]), "%s%s", &method, &host)
 
